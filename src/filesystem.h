@@ -23,16 +23,17 @@
     FS_MAX_PATH      - maximum length of a path in bytes (default: 256)
 
 
-    FEATURE OVERVIEW
-    ================
+    FEATURE OVERVIEW:
+    =================
 
-    TODO: write feature overview
+    filesystem.h provides a minimalistic API which implements
+    the basics functions for interfacing with a filesystem.
 
-
-    STEP BY STEP
-    ============
-
-    TODO: step by step
+    - file reading, appending, and writing
+    - creating and deleting files and directories
+    - retrieving information on files
+    - write directory to only allow writes in specific directory
+    - search path for searching multiple directories
 
 
     FUNCTIONS:
@@ -54,8 +55,58 @@
     fs_write(const char *name, void *data, int size);
 
 
-    LICENSE
-    =======
+    STEP BY STEP:
+    =============
+
+    --- Add a search path. A search path is a list of directories where
+        to search for files. The search path is a template where the 
+        interrogation point `?` is replaced by a given filename.
+        The templates in a path are separated by semicolons `;`.
+
+        `./?;c:/windows/?;/usr/local/?`
+
+    --- Add a write directory. A write directory indicates the directory
+        where we can write to. Much like the search path, the write directory
+        is a template where the interrogation point `?` is replaced by a
+        given filename. However, only one template is allowed.
+
+
+    READING FROM A FILE:
+    ====================
+
+    --- When reading from a file, the file is opened, memory is allocated,
+        copied, and the file is closed before the function returns a pointer
+        to the data read.
+
+        Ownership of the pointer is that of the user, and the pointer must
+        freed after use to avoid memory leaks.
+
+
+        int size;
+        const char *data = (char *) fs_read("example.txt", &size);
+
+        fs_free(data);
+
+
+    WRITTING TO A FILE:
+    ===================
+
+    --- When writting, or appending, to a file, the file is closed after
+        writting has completed, or failed.
+
+        If the file already exists, it will be completely replaced by the new contents.
+        However, if the file doesn't exist a new one will be created.
+
+
+        const char *text = "the quick brown fox jumps over the lazy dog";
+        int err = fs_write("example.txt", text, strlen(text));
+
+        if (err != FS_ESUCCESS) {
+          return -1;
+        }
+
+    LICENSE:
+    ========
 
     MIT License
 
@@ -238,9 +289,9 @@ _FS_PRIVATE const char *_fs_get_template(const char *path, char *buf) {
   return t;
 }
 
-#define _FS_CNCT_PATH(b, p, n)      \
-    err = _fs_concat_path(b, p, n); \
-    if (err) return err;            \
+#define _FS_CNCT_PATH(b, p, n)    \
+  err = _fs_concat_path(b, p, n); \
+  if (err) return err;            \
 
 _FS_PRIVATE int _fs_concat_path(char *buf, const char *path, const char *filename) {
   const char *s = path;
