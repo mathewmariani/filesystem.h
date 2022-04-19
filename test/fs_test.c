@@ -7,10 +7,13 @@
 #define _SEARCH_PATH "./?"
 #define _FILE_DATA   "quick brown fox"
 
-#define CREATE_FILE(name)               \
-  do {                                  \
-    const char *data = _FILE_DATA;      \
-    fs_write(name, data, strlen(data)); \
+#define CREATE_FILE(name)             \
+  do {                                \
+    const char *data = _FILE_DATA;    \
+    fs_write(name, &(fs_write_desc) { \
+      .data = data,                   \
+      .size = strlen(data),           \
+    });                               \
   } while (0)
 
 #define CREATE_DIR(path) \
@@ -23,7 +26,11 @@ void test_fs_append(void) {
   fs_info info;
 
   /* no write directory */
-  err = fs_append("example.txt", _FILE_DATA, strlen(_FILE_DATA));
+  err = fs_append("example.txt", &(fs_write_desc) {
+    .data = _FILE_DATA,
+    .size = strlen(_FILE_DATA),
+  });
+
   TEST_CHECK(err == FS_ENOWRITEDIR);
 
   /* set search path */
@@ -37,18 +44,21 @@ void test_fs_append(void) {
   TEST_CHECK(err == FS_EFAILURE);
 
   /* create a new file */
-  err = fs_append("example.txt", _FILE_DATA, strlen(_FILE_DATA));
+  err = fs_append("example.txt", &(fs_write_desc) {
+    .data = _FILE_DATA,
+    .size = strlen(_FILE_DATA),
+  });
   TEST_CHECK(err == FS_ESUCCESS);
 
   /* check the file we created */
   err = fs_get_info("example.txt", &info);
   TEST_CHECK(err == FS_ESUCCESS);
-  TEST_CHECK(info.type == FS_TREG);
+  TEST_CHECK(info.type == FS_FILETYPE_REG);
   TEST_CHECK(info.size == strlen(_FILE_DATA));
   TEST_CHECK(info.modtime > 0);
 
   /* compare contents of file */
-  int size;
+  size_t size;
   char *txt = fs_read("example.txt", &size);
   TEST_CHECK(txt != NULL);
   TEST_CHECK(size == info.size);
@@ -56,7 +66,10 @@ void test_fs_append(void) {
 
   /* should not overwrite file */
   const char *new_text = " jumps over the lazy dog";
-  err = fs_append("example.txt", new_text, strlen(new_text));
+  err = fs_append("example.txt", &(fs_write_desc) {
+    .data = new_text,
+    .size = strlen(new_text),
+  });
   TEST_CHECK(err == FS_ESUCCESS);
 
   /* compare contents of file */
@@ -65,19 +78,23 @@ void test_fs_append(void) {
   TEST_CHECK(size == strlen(_FILE_DATA) + strlen(new_text));
 
   /* should create directory tree */
-  err = fs_append("foo/example.txt", _FILE_DATA, strlen(_FILE_DATA));
+  err = fs_append("foo/example.txt", &(fs_write_desc) {
+    .data = _FILE_DATA,
+    .size = strlen(_FILE_DATA),
+  });
   TEST_CHECK(err == FS_ESUCCESS);
 
   /* check we created a directory */
   err = fs_get_info("foo", &info);
   TEST_CHECK(err == FS_ESUCCESS);
-  TEST_CHECK(info.type == FS_TDIR);  
+  TEST_CHECK(info.type == FS_FILETYPE_DIR);  
 
   /* cleanup after test */
   fs_delete("foo/example.txt");
   fs_delete("foo");
   fs_delete("example.txt");
 }
+
 
 void test_fs_delete(void) {
   int err;
@@ -200,7 +217,7 @@ void test_fs_get_info(void) {
   CREATE_FILE("example.txt");
   err = fs_get_info("example.txt", &info);
   TEST_CHECK(err == FS_ESUCCESS);
-  TEST_CHECK(info.type == FS_TREG);
+  TEST_CHECK(info.type == FS_FILETYPE_REG);
   TEST_CHECK(info.size > 0);
   TEST_CHECK(info.modtime > 0);
 
@@ -208,7 +225,7 @@ void test_fs_get_info(void) {
   CREATE_DIR("foo");
   err = fs_get_info("foo", &info);
   TEST_CHECK(err == FS_ESUCCESS);
-  TEST_CHECK(info.type == FS_TDIR);
+  TEST_CHECK(info.type == FS_FILETYPE_DIR);
   TEST_CHECK(info.size > 0);
   TEST_CHECK(info.modtime > 0);
 
@@ -238,7 +255,7 @@ void test_fs_mkdir(void) {
   /* check if we created a directory */
   err = fs_get_info("foo", &info);
   TEST_CHECK(err == FS_ESUCCESS);
-  TEST_CHECK(info.type == FS_TDIR);
+  TEST_CHECK(info.type == FS_FILETYPE_DIR);
 
   /* create existing directory */
   err = fs_mkdir("foo");
@@ -251,7 +268,7 @@ void test_fs_mkdir(void) {
   /* check if we created a directory */
   err = fs_get_info("foo/bar", &info);
   TEST_CHECK(err == FS_ESUCCESS);
-  TEST_CHECK(info.type == FS_TDIR);
+  TEST_CHECK(info.type == FS_FILETYPE_DIR);
 
   /* cleanup after test */
   fs_delete("foo/bar");
@@ -259,7 +276,7 @@ void test_fs_mkdir(void) {
 }
 
 void test_fs_read(void) {
-  int size;
+  size_t size;
   void *data;
   fs_info info;
 
@@ -294,7 +311,10 @@ void test_fs_write(void) {
   fs_info info;
 
   /* no write directory */
-  err = fs_write("example.txt", _FILE_DATA, strlen(_FILE_DATA));
+  err = fs_write("example.txt", &(fs_write_desc) {
+    .data = _FILE_DATA,
+    .size = strlen(_FILE_DATA),
+  });
   TEST_CHECK(err == FS_ENOWRITEDIR);
 
   /* set search path */
@@ -308,18 +328,21 @@ void test_fs_write(void) {
   TEST_CHECK(err == FS_EFAILURE);
 
   /* create a new file */
-  err = fs_write("example.txt", _FILE_DATA, strlen(_FILE_DATA));
+  err = fs_write("example.txt", &(fs_write_desc) {
+    .data = _FILE_DATA,
+    .size = strlen(_FILE_DATA),
+  });
   TEST_CHECK(err == FS_ESUCCESS);
 
   /* check the file we created */
   err = fs_get_info("example.txt", &info);
   TEST_CHECK(err == FS_ESUCCESS);
-  TEST_CHECK(info.type == FS_TREG);
+  TEST_CHECK(info.type == FS_FILETYPE_REG);
   TEST_CHECK(info.size == strlen(_FILE_DATA));
   TEST_CHECK(info.modtime > 0);
 
   /* compare contents of file */
-  int size;
+  size_t size;
   char *txt = fs_read("example.txt", &size);
   TEST_CHECK(txt != NULL);
   TEST_CHECK(size == info.size);
@@ -327,7 +350,10 @@ void test_fs_write(void) {
 
   /* should overwrite file */
   const char *new_text = "all new data";
-  err = fs_write("example.txt", new_text, strlen(new_text));
+  err = fs_write("example.txt", &(fs_write_desc) {
+    .data = new_text,
+    .size = strlen(new_text),
+  });
   TEST_CHECK(err == FS_ESUCCESS);
 
   /* compare contents of file */
@@ -338,13 +364,16 @@ void test_fs_write(void) {
   TEST_CHECK(strcmp(txt, new_text) == 0);
 
   /* should create directory tree */
-  err = fs_write("foo/example.txt", _FILE_DATA, strlen(_FILE_DATA));
+  err = fs_write("foo/example.txt", &(fs_write_desc) {
+    .data = _FILE_DATA,
+    .size = strlen(_FILE_DATA),
+  });
   TEST_CHECK(err == FS_ESUCCESS);
 
   /* check we created a directory */
   err = fs_get_info("foo", &info);
   TEST_CHECK(err == FS_ESUCCESS);
-  TEST_CHECK(info.type == FS_TDIR);  
+  TEST_CHECK(info.type == FS_FILETYPE_DIR);  
 
   /* cleanup after test */
   fs_delete("foo/example.txt");

@@ -2,8 +2,6 @@
 #define FS_IMPLEMENTATION
 #endif
 #ifndef FS_INCLUDED
-#define FS_INCLUDED
-
 /*
     filesystem.h -- a *tiny* library for interfacing with a filesystem.
 
@@ -39,7 +37,7 @@
     FUNCTIONS:
     ==========
 
-    fs_append(const char *name, void *data, int *size);
+    fs_append(const char *name, void *data, size_t *size);
     fs_delete(const char *name);
     fs_exists(const char *path);
     fs_free(void *p);
@@ -48,11 +46,11 @@
     fs_get_search_path()
     fs_get_write_dir()
     fs_mkdir(const char *path);
-    fs_read(const char *name, int *size);
+    fs_read(const char *name, size_t *size);
     fs_set_search_path(const char *path);
     fs_set_write_dir(const char *path);
     fs_strerror(int err);
-    fs_write(const char *name, void *data, int size);
+    fs_write(const char *name, void *data, size_t size);
 
 
     STEP BY STEP:
@@ -82,7 +80,7 @@
         freed after use to avoid memory leaks.
 
 
-        int size;
+        size_t size;
         const char *data = (char *) fs_read("example.txt", &size);
 
         fs_free(data);
@@ -104,6 +102,7 @@
         if (err != FS_ESUCCESS) {
           return -1;
         }
+
 
     LICENSE:
     ========
@@ -130,6 +129,9 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 */
+#define FS_INCLUDED
+
+#include <string.h>
 
 #if !defined (FS_API_DECL)
 #define FS_API_DECL extern
@@ -151,19 +153,23 @@ enum {
   FS_EREMOVE       = -7,
 };
 
-/* file type */
-enum {
-  FS_TREG,
-  FS_TDIR,
-  FS_TSYM,
-  FS_TNONE,
-};
+typedef enum fs_file_type {
+  FS_FILETYPE_NONE,
+  FS_FILETYPE_REG,
+  FS_FILETYPE_DIR,
+  FS_FILETYPE_SYM,
+} fs_file_type;
 
 typedef struct fs_info {
-  int type;
-  int size;
+  fs_file_type type;
+  size_t size;
   long int modtime;
 } fs_info;
+
+typedef struct fs_write_desc {
+  const void *data;
+  size_t size;
+} fs_write_desc;
 
 /* converts error to a human readable string */
 FS_API_DECL const char *fs_strerror(int err);
@@ -176,26 +182,32 @@ FS_API_DECL const char *fs_get_write_dir();
 /* sets the write directory */
 FS_API_DECL int fs_set_write_dir(const char *path);
 /* return true if a file or a directory exists */
-FS_API_DECL int fs_exists(const char *filename);
+FS_API_DECL int fs_exists(const char *path);
 /* reads the contents of a file */
-FS_API_DECL void *fs_read(const char *filename, int *size);
+FS_API_DECL void *fs_read(const char *name, size_t *size);
 /* writes data to a file */
-FS_API_DECL int fs_write(const char *filename, const void *data, int size);
+FS_API_DECL int fs_write(const char *name, const fs_write_desc *desc);
 /* writes data to the end of a file */
-FS_API_DECL int fs_append(const char *filename, const void *data, int size);
+FS_API_DECL int fs_append(const char *name, const fs_write_desc *desc);
 /* gets information about the specified file or directory */
-FS_API_DECL int fs_get_info(const char *filename, fs_info *info);
+FS_API_DECL int fs_get_info(const char *path, fs_info *info);
 /* gets the current working directory */
 FS_API_DECL char *fs_get_cwd();
 /* creates a directory */
 FS_API_DECL int fs_mkdir(const char *path);
 /* deletes a file or directory */
-FS_API_DECL int fs_delete(const char *filename);
+FS_API_DECL int fs_delete(const char *name);
 /* frees allocated memory */
 FS_API_DECL inline void fs_free(void *p);
 
 #ifdef __cplusplus
 }
+
+/* reference-based equivalents for c++ */
+inline int fs_get_info(const char *filename, const fs_info &info) { return fs_get_info(filename, &info); }
+inline int fs_write(const char *name, const fs_write_desc &desc) { return fs_write(filename, &desc); }
+inline int fs_append(const char *name, const fs_write_desc &desc) { return fs_append(filename, &desc); }
+
 #endif
 
 #endif /* FS_INCLUDED */
@@ -204,10 +216,8 @@ FS_API_DECL inline void fs_free(void *p);
 #define FS_IMPL_INCLUDED (1)
 
 #include <stdio.h>
-#include <string.h>
 #include <time.h>
 #include <sys/stat.h>
-#include <errno.h>
 
 #if defined (_WIN32)
 #include <windows.h>
@@ -350,12 +360,12 @@ _FS_PRIVATE int _fs_get_type(const char *filename) {
   char path[FS_MAX_PATH];
   struct stat fstat;
   if (_fs_check_search_path(filename, &path[0], &fstat) != FS_ESUCCESS) {
-    return FS_TNONE;
+    return FS_FILETYPE_NONE;
   }
-  if (S_ISREG(fstat.st_mode)) return FS_TREG;
-  if (S_ISDIR(fstat.st_mode)) return FS_TDIR;
-  if (S_ISLNK(fstat.st_mode)) return FS_TSYM;
-  return FS_TNONE;
+  if (S_ISREG(fstat.st_mode)) return FS_FILETYPE_REG;
+  if (S_ISDIR(fstat.st_mode)) return FS_FILETYPE_DIR;
+  if (S_ISLNK(fstat.st_mode)) return FS_FILETYPE_SYM;
+  return FS_FILETYPE_NONE;
 }
 
 #define _FS_CREATE_DIR_TREE()     \
@@ -418,17 +428,17 @@ int fs_set_write_dir(const char *path) {
   return FS_ESUCCESS;
 }
 
-int fs_exists(const char *filename) {
+int fs_exists(const char *path) {
   _FS_SANITY_SEARCH_PATH();
-  return _fs_get_type(filename) != FS_TNONE
+  return _fs_get_type(path) != FS_FILETYPE_NONE
     ? FS_ESUCCESS
     : FS_EFAILURE;
 }
 
-void *fs_read(const char *filename, int *size) {
+void *fs_read(const char *name, size_t *size) {
   char path[FS_MAX_PATH];
   struct stat fstat;
-  if (_fs_check_search_path(filename, &path[0], &fstat) != FS_ESUCCESS) {
+  if (_fs_check_search_path(name, &path[0], &fstat) != FS_ESUCCESS) {
     return NULL;
   }
   FILE *fp = fopen(path, _FS_MREAD);
@@ -445,7 +455,7 @@ void *fs_read(const char *filename, int *size) {
   return b;
 }
 
-_FS_PRIVATE int _fs_write_to_file(const char *path, const char *mode, const void *data, const int size) {
+_FS_PRIVATE int _fs_write_to_file(const char *path, const char *mode, const void *data, const size_t size) {
   if (strstr(path, "..")) {
     return FS_EWRITEFAIL;
   }
@@ -460,42 +470,57 @@ _FS_PRIVATE int _fs_write_to_file(const char *path, const char *mode, const void
     : FS_EWRITEFAIL;
 }
 
-int fs_write(const char *filename, const void *data, int size) {
+_FS_PRIVATE int _fs_write_to_file_ext(const char *path, const char *mode, const fs_write_desc *desc) {
+  if (strstr(path, "..")) {
+    return FS_EWRITEFAIL;
+  }
+  FILE *fp = fopen(path, mode);
+  if (!fp) {
+    return FS_EWRITEFAIL;
+  }
+  int wsize = fwrite(desc->data, sizeof(char), desc->size, fp);
+  fclose(fp);
+  return wsize == desc->size
+    ? FS_ESUCCESS
+    : FS_EWRITEFAIL;
+}
+
+int fs_write(const char *name, const fs_write_desc *desc) {
   _FS_SANITY_WRITE_DIR();
   int err;
   char buf[FS_MAX_PATH];
-  _FS_CNCT_PATH(buf, _fs_write_dir, filename);
+  _FS_CNCT_PATH(buf, _fs_write_dir, name);
   _FS_CREATE_DIR_TREE();
-  return _fs_write_to_file(buf, _FS_MWRITE, data, size);
+  return _fs_write_to_file_ext(buf, _FS_MWRITE, desc);
 }
 
-int fs_append(const char *filename, const void *data, int size) {
+int fs_append(const char *name, const fs_write_desc *desc) {
   _FS_SANITY_WRITE_DIR();
   int err;
   char buf[FS_MAX_PATH];
-  _FS_CNCT_PATH(buf, _fs_write_dir, filename);
+  _FS_CNCT_PATH(buf, _fs_write_dir, name);
   _FS_CREATE_DIR_TREE();
-  return _fs_write_to_file(buf, _FS_MAPPEND, data, size);
+  return _fs_write_to_file_ext(buf, _FS_MAPPEND, desc);
 }
 
-FS_API_DECL int fs_get_info(const char *filename, fs_info *info) {
+FS_API_DECL int fs_get_info(const char *path, fs_info *info) {
   _FS_SANITY_SEARCH_PATH();
-  char path[FS_MAX_PATH];
+  char buf[FS_MAX_PATH];
   struct stat fstat;
-  int err = _fs_check_search_path(filename, &path[0], &fstat);
+  int err = _fs_check_search_path(path, &buf[0], &fstat);
   if (err) {
     return err;
   }
   info->size = fstat.st_size;
   info->modtime = fstat.st_mtime;
   if (S_ISREG(fstat.st_mode)) {
-    info->type = FS_TREG;
+    info->type = FS_FILETYPE_REG;
   } else if (S_ISDIR(fstat.st_mode)) {
-    info->type = FS_TDIR;
+    info->type = FS_FILETYPE_DIR;
   } else if (S_ISLNK(fstat.st_mode)) {
-    info->type = FS_TSYM;
+    info->type = FS_FILETYPE_SYM;
   } else {
-    info->type = FS_TNONE;
+    info->type = FS_FILETYPE_NONE;
   }
   return FS_ESUCCESS;
 }
@@ -513,11 +538,11 @@ FS_API_DECL int fs_mkdir(const char *path) {
   return _fs_make_dirs(buf);
 }
 
-FS_API_DECL int fs_delete(const char *filename) {
+FS_API_DECL int fs_delete(const char *name) {
   _FS_SANITY_WRITE_DIR();
   int err;
   char buf[FS_MAX_PATH];
-  _FS_CNCT_PATH(buf, _fs_write_dir, filename);
+  _FS_CNCT_PATH(buf, _fs_write_dir, name);
   return (remove(buf) != 0)
     ? FS_EREMOVE
     : FS_ESUCCESS;
