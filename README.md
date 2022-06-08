@@ -2,8 +2,8 @@
 
 a *tiny* library for interfacing with a filesystem.
 
-- searches for files on the "search path"
-- does not write outside the "write directory"
+- searches for files within a search path
+- does not write outside the write directory
 - supported platforms: Win32, macOS, Linux
 - written in C99
 
@@ -12,13 +12,13 @@ a *tiny* library for interfacing with a filesystem.
 into an existing project and compiled along with it. The library provides 7 functions for interfacing with a filesystem.
 
 ```c
-fs_append(const char *name, void *data, size_t *size);
-fs_delete(const char *name);
-fs_exists(const char *path);
-fs_get_info(const char *path, fs_info *info);
-fs_mkdir(const char *path);
-fs_read(const char *name, size_t *size);
-fs_write(const char *name, fs_write_desc *desc);
+fs_append(const char* name, const fs_data* data)
+fs_delete(const char* name)
+fs_exists(const char* path)
+fs_get_info(const char* path, fs_info* info)
+fs_mkdir(const char* path)
+fs_read(const char* name, size_t* size)
+fs_write(const char* name, const fs_data* data)
 ```
 
 ```c
@@ -28,13 +28,15 @@ fs_write(const char *name, fs_write_desc *desc);
 #include "filesystem.h"
 
 int main(int argc, char* argv[]) {
-  fs_set_search_path("?;foo/?;/foo/bar/?");
+  char* cwd = (char*) fs_get_cwd();
+  fs_setup(&(fs_desc) {
+    .write_dir = cwd,
+    .base_paths = { cwd },
+  });
 
   fs_info info;
-  int err = fs_get_info("coffee.txt", &fs_info);
-
-  if (err != FS_ESUCCESS) {
-    printf("[error] %s\n", fs_errtostr(err));
+  if (!fs_get_info("coffee.txt", &fs_info)) {
+    printf("[error could not read file]\n");
     return -1;
   }
 

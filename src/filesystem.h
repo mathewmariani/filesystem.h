@@ -16,9 +16,9 @@
 
     ...optionally you can provide the following macros to override defaults:
 
+    FS_ASSERT(c)     - your own assert function (default: assert(c))
     FS_MALLOC(s)     - your own malloc function (default: malloc(s))
     FS_FREE(p)       - your own free function (default: free(p))
-    FS_MAX_PATH      - maximum length of a path in bytes (default: 256)
 
 
     FEATURE OVERVIEW:
@@ -37,36 +37,64 @@
     FUNCTIONS:
     ==========
 
-    fs_append(const char *name, void *data, size_t *size);
-    fs_delete(const char *name);
-    fs_exists(const char *path);
-    fs_free(void *p);
-    fs_get_cwd();
-    fs_get_info(const char *path, fs_info *info);
-    fs_get_search_path()
-    fs_get_write_dir()
-    fs_mkdir(const char *path);
-    fs_read(const char *name, size_t *size);
-    fs_set_search_path(const char *path);
-    fs_set_write_dir(const char *path);
-    fs_strerror(int err);
-    fs_write(const char *name, void *data, size_t size);
+    fs_setup(const fs_desc* desc)
+    fs_shutdown(void)
+    fs_is_valid(void)
+
+    fs_append(const char* name, const fs_data* data)
+    fs_delete(const char* name)
+    fs_exists(const char* path)
+    fs_free(void* p)
+    fs_get_cwd()
+    fs_get_info(const char* path, fs_info* info)
+    fs_insert_basepath(const char* path)
+    fs_mkdir(const char* path)
+    fs_read(const char* name, size_t* size)
+    fs_remove_basepath(const char* path)
+    fs_write(const char* name, const fs_data* data)
 
 
     STEP BY STEP:
     =============
 
-    --- Add a search path. A search path is a list of directories where
-        to search for files. The search path is a template where the 
-        interrogation point `?` is replaced by a given filename.
-        The templates in a path are separated by semicolons `;`.
+    --- to initialize and cleanup filesystem.h, call:
 
-        `./?;c:/windows/?;/usr/local/?`
+            fs_setup(const fs_desc* desc)
+            fs_shutdown()
 
-    --- Add a write directory. A write directory indicates the directory
-        where we can write to. Much like the search path, the write directory
-        is a template where the interrogation point `?` is replaced by a
-        given filename. However, only one template is allowed.
+    --- to add/remove a directory from the search path, call:
+
+            fs_insert_basepath(const char* path)
+            fs_remove_basepath(const char* path)
+    
+    --- to check if a file exists, call:
+
+            fs_exists(const char* path)
+
+    --- to write data to a file, call:
+
+            fs_append(const char* name, fs_data* data)
+            fs_write(const char* name, fs_data* data)
+
+    --- to read data from a file, call:
+
+            fs_read(const char* name, size_t* size);
+
+    --- to get information about a file or directory, call:
+
+            fs_get_info(const char* path, fs_info* info)
+
+    --- to create a directory or directory tree, call:
+
+            fs_mkdir(const char* path)
+
+    --- to delete a file or directory, call:
+
+            fs_delete(const char* name)
+
+    --- to get the current working directory, call:
+
+            fs_get_cwd()
 
 
     READING FROM A FILE:
@@ -81,7 +109,7 @@
 
 
         size_t size;
-        const char *data = (char *) fs_read("example.txt", &size);
+        const char* data = (char*) fs_read("example.txt", &size);
 
         fs_free(data);
 
@@ -96,10 +124,8 @@
         However, if the file doesn't exist a new one will be created.
 
 
-        const char *text = "the quick brown fox jumps over the lazy dog";
-        int err = fs_write("example.txt", text, strlen(text));
-
-        if (err != FS_ESUCCESS) {
+        const char* text = "the quick brown fox jumps over the lazy dog";
+        if (!fs_write("example.txt", FS_DATA(text))) {
           return -1;
         }
 
@@ -129,28 +155,36 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 */
-#define FS_INCLUDED
+#define FS_INCLUDED (1)
 
-#include <string.h>
+#include <stdbool.h>
+#include <stddef.h> /* size_t */
 
 #if !defined (FS_API_DECL)
-#define FS_API_DECL extern
+  #define FS_API_DECL extern
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* errors */
+typedef struct fs_data {
+  const void* data;
+  size_t size;
+} fs_data;
+
+#if defined(__cplusplus)
+  #define FS_DATA_STR(x) fs_data { &x, strlen(x) }
+  #define FS_DATA_STR_REF(x) fs_data { &x, strlen(x) }
+#else
+  #define FS_DATA_STR(x) (fs_data) { x, strlen(x) }
+  #define FS_DATA_STR_REF(x) &(fs_data) { x, strlen(x) }
+#endif
+
+/* compile-time constants */
 enum {
-  FS_ESUCCESS      =  0,
-  FS_EFAILURE      = -1,
-  FS_ETOOLONG      = -2,
-  FS_ENOWRITEDIR   = -3,
-  FS_EWRITEFAIL    = -4,
-  FS_EMKDIRFAIL    = -5,
-  FS_ENOSEARCHPATH = -6,
-  FS_EREMOVE       = -7,
+  FS_MAX_PATH = 256,
+  FS_MAX_MOUNTS = 3,
 };
 
 typedef enum fs_file_type {
@@ -166,47 +200,48 @@ typedef struct fs_info {
   long int modtime;
 } fs_info;
 
-typedef struct fs_write_desc {
-  const void *data;
-  size_t size;
-} fs_write_desc;
+typedef struct fs_desc {
+  const char* write_dir;
+  const char* base_paths[3];
+} fs_desc;
 
-/* converts error to a human readable string */
-FS_API_DECL const char *fs_strerror(int err);
-/* gets the search path */
-FS_API_DECL const char *fs_get_search_path();
-/* sets the search path */
-FS_API_DECL int fs_set_search_path(const char *path);
-/* gets the write directory */
-FS_API_DECL const char *fs_get_write_dir();
-/* sets the write directory */
-FS_API_DECL int fs_set_write_dir(const char *path);
+/* setup filesystem */
+FS_API_DECL void fs_setup(const fs_desc* desc);
+/* shutdown filesystem */
+FS_API_DECL void fs_shutdown(void);
+/* true between `fs_setup()` and `fs_shutdown()` */
+FS_API_DECL bool fs_is_valid(void);
+/* adds a directory to the search path */
+FS_API_DECL bool fs_insert_basepath(const char* path);
+/* removes a directory to the search path */
+FS_API_DECL bool fs_remove_basepath(const char* path);
 /* return true if a file or a directory exists */
-FS_API_DECL int fs_exists(const char *path);
+FS_API_DECL bool fs_exists(const char* path);
 /* reads the contents of a file */
-FS_API_DECL void *fs_read(const char *name, size_t *size);
+FS_API_DECL void* fs_read(const char* name, size_t* size);
 /* writes data to a file */
-FS_API_DECL int fs_write(const char *name, const fs_write_desc *desc);
+FS_API_DECL bool fs_write(const char* name, const fs_data* data);
 /* writes data to the end of a file */
-FS_API_DECL int fs_append(const char *name, const fs_write_desc *desc);
+FS_API_DECL bool fs_append(const char* name, const fs_data* data);
 /* gets information about the specified file or directory */
-FS_API_DECL int fs_get_info(const char *path, fs_info *info);
+FS_API_DECL bool fs_get_info(const char* path, fs_info* info);
 /* gets the current working directory */
-FS_API_DECL char *fs_get_cwd();
+FS_API_DECL const char* fs_get_cwd();
 /* creates a directory */
-FS_API_DECL int fs_mkdir(const char *path);
+FS_API_DECL bool fs_mkdir(const char* path);
 /* deletes a file or directory */
-FS_API_DECL int fs_delete(const char *name);
+FS_API_DECL bool fs_delete(const char* name);
 /* frees allocated memory */
-FS_API_DECL inline void fs_free(void *p);
+FS_API_DECL inline void fs_free(void* p);
 
 #ifdef __cplusplus
 }
 
 /* reference-based equivalents for c++ */
-inline int fs_get_info(const char *filename, const fs_info &info) { return fs_get_info(filename, &info); }
-inline int fs_write(const char *name, const fs_write_desc &desc) { return fs_write(filename, &desc); }
-inline int fs_append(const char *name, const fs_write_desc &desc) { return fs_append(filename, &desc); }
+inline void fs_setup(const fs_desc& data) { return fs_setup(&data); }
+inline bool fs_get_info(const char* filename, fs_info &info) { return fs_get_info(filename, &info); }
+inline bool fs_write(const char* name, fs_data &data) { return fs_write(filename, &data); }
+inline bool fs_append(const char* name, fs_data &data) { return fs_append(filename, &data); }
 
 #endif
 
@@ -215,340 +250,327 @@ inline int fs_append(const char *name, const fs_write_desc &desc) { return fs_ap
 #ifdef FS_IMPLEMENTATION
 #define FS_IMPL_INCLUDED (1)
 
+#include <string.h>
 #include <stdio.h>
-#include <time.h>
 #include <sys/stat.h>
+#include <errno.h>
 
 #if defined (_WIN32)
-#include <windows.h>
-#include <direct.h>
-#define _getcwd getcwd
+  #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+  #endif
+  #ifndef NOMINMAX
+  #define NOMINMAX
+  #endif
+  #include <windows.h>
+  #include <direct.h>
+  #define _getcwd getcwd
 #else
-#include <sys/param.h>
-#include <unistd.h>
+  #include <sys/param.h>
+  #include <unistd.h>
 #endif
 
 #ifndef _FS_PRIVATE
-#if defined(__GNUC__) || defined(__clang__)
-#define _FS_PRIVATE __attribute__((unused)) static
-#else
-#define _FS_PRIVATE static
-#endif
+  #if defined(__GNUC__) || defined(__clang__)
+    #define _FS_PRIVATE __attribute__((unused)) static
+  #else
+    #define _FS_PRIVATE static
+  #endif
 #endif
 
-/* configuration */
-#if !defined (FS_MAX_PATH)
-#define FS_MAX_PATH 256
-#endif
-#if !defined (FS_PATH_SEP)
-#define FS_PATH_SEP ";"
-#endif
-#if !defined (FS_PATH_MARK)
-#define FS_PATH_MARK "?"
+#if !defined (FS_ASSERT)
+  #include <assert.h>
+  #define FS_ASSERT(c) assert(c)
 #endif
 
 #if !defined (FS_MALLOC)
   #include <stdlib.h>
   #define FS_MALLOC(s) malloc(s)
-  #define FS_FREE(p) free(p)
+  #define FS_FREE(p)   free(p)
 #endif
 
-#if defined (_WIN32)
-#define FS_DIR_SEP   '\\'
-#else
-#define FS_DIR_SEP   '/'
-#endif
+enum {
+  _FS_MREAD,
+  _FS_MWRITE,
+  _FS_MAPPEND,
+};
 
-#define _FS_MREAD   "rb"
-#define _FS_MWRITE  "w"
-#define _FS_MAPPEND "a"
-
-#define _FS_SANITY_WRITE_DIR() \
-  if (!*_fs_write_dir) {       \
-    return FS_ENOWRITEDIR;     \
-  }
-
-#define _FS_SANITY_SEARCH_PATH() \
-  if (!*_fs_search_path) {       \
-    return FS_ENOSEARCHPATH;     \
-  } 
-
-_FS_PRIVATE char _fs_search_path[FS_MAX_PATH];
-_FS_PRIVATE char _fs_write_dir[FS_MAX_PATH];
-
-_FS_PRIVATE const char *_fs_get_template(const char *path, char *buf) {
-  const char *t;
-
-  /* skip any separators */
-  while (*path == *FS_PATH_SEP) {
-    path++;
-  }
-
-  /* no more templates */
-  if (*path == '\0') {
-    return NULL;
-  }
-
-  t = strchr(path, *FS_PATH_SEP);
-  if (t == NULL) {
-    t = path + strlen(path);
-  }
-
-  strncpy(buf, path, t - path);
-  buf[t - path] = '\0';
-  return t;
-}
-
-#define _FS_CNCT_PATH(b, p, n)    \
-  err = _fs_concat_path(b, p, n); \
-  if (err) return err;            \
-
-_FS_PRIVATE int _fs_concat_path(char *buf, const char *path, const char *filename) {
-  const char *s = path;
-  const char *p = FS_PATH_MARK;
-  const char *r = filename;
-
-  unsigned int l = strlen(p);
-  unsigned int n = 0;
-
-  #define CONCAT(b, n, s, l)    \
-    do {                        \
-      if (l <= 0) break;        \
-      memcpy((void*)&b[n],s,l); \
-      n+=l;                     \
-    } while(0)
-
-  /* gsub */
-  const char *pch = strstr(s, p);
-  while (pch != NULL) {
-    CONCAT(buf, n, s, pch - s);
-    CONCAT(buf, n, r, strlen(r));
-    if (n >= FS_MAX_PATH) {
-      return FS_ETOOLONG;
-    }
-    s = pch + l;
-    pch = strstr(s, p);
-  }
-
-  #undef CONCAT
-
-  /* null-terminator */
-  buf[n] = '\0';
-
-  return FS_ESUCCESS;
-}
-
-_FS_PRIVATE int _fs_check_search_path(const char *filename, char *buf, struct stat *fstat) {
-  _FS_SANITY_SEARCH_PATH();
-
-  int err;
-  char str[FS_MAX_PATH];
-
-  /* create template */
-  const char *path = _fs_search_path;
-  while ((path = _fs_get_template(path, &str[0])) != NULL) {
-    _FS_CNCT_PATH(buf, &str[0], filename);
-    if (stat(buf, fstat) == 0) {
-      return FS_ESUCCESS;
-    }
-  }
-
-  return FS_EFAILURE;
-}
-
-_FS_PRIVATE int _fs_get_type(const char *filename) {
-  char path[FS_MAX_PATH];
-  struct stat fstat;
-  if (_fs_check_search_path(filename, &path[0], &fstat) != FS_ESUCCESS) {
-    return FS_FILETYPE_NONE;
-  }
-  if (S_ISREG(fstat.st_mode)) return FS_FILETYPE_REG;
-  if (S_ISDIR(fstat.st_mode)) return FS_FILETYPE_DIR;
-  if (S_ISLNK(fstat.st_mode)) return FS_FILETYPE_SYM;
-  return FS_FILETYPE_NONE;
-}
-
-#define _FS_CREATE_DIR_TREE()     \
-  do {                            \
-    if (strrchr(buf, '/')) {      \
-      char tree[FS_MAX_PATH];     \
-      strcpy(tree, buf);          \
-      *strrchr(tree, '/') = '\0'; \
-      _fs_make_dirs(tree);        \
-    }                             \
-  } while (0)
-
-_FS_PRIVATE int _fs_make_dirs(char *path) {
-  char *s = strrchr(path, '/');
-  if (s != NULL) {
-    *s = 0;
-    _fs_make_dirs(path);
-    *s = '/';
-  }
-  return (mkdir(path, S_IRWXU) == -1)
-    ? FS_EMKDIRFAIL
-    : FS_ESUCCESS;
-}
-
-const char *fs_strerror(int err) {
-  switch (err) {
-    case FS_ESUCCESS:      return "success";
-    case FS_EFAILURE:      return "failure";
-    case FS_ETOOLONG:      return "path too long";
-    case FS_ENOWRITEDIR:   return "no write directory";
-    case FS_EWRITEFAIL:    return "could not write to file";
-    case FS_EMKDIRFAIL:    return "could not make directory";
-    case FS_ENOSEARCHPATH: return "no search path";
-    case FS_EREMOVE:       return "could not delete file or directory";
-  }
-  return "unknown error";
-}
-
-const char *fs_get_search_path() {
-  return _fs_search_path;
-}
-
-int fs_set_search_path(const char *path) {
-  if (strlen(path) >= FS_MAX_PATH) {
-    return FS_ETOOLONG;
-  }
-  strcpy(_fs_search_path, path);
-  return FS_ESUCCESS;
-}
-
-const char *fs_get_write_dir() {
-  return _fs_write_dir;
-}
-
-int fs_set_write_dir(const char *path) {
-  if (strlen(path) >= FS_MAX_PATH) {
-    return FS_ETOOLONG;
-  }
-  strcpy(_fs_write_dir, path);
-  return FS_ESUCCESS;
-}
-
-int fs_exists(const char *path) {
-  _FS_SANITY_SEARCH_PATH();
-  return _fs_get_type(path) != FS_FILETYPE_NONE
-    ? FS_ESUCCESS
-    : FS_EFAILURE;
-}
-
-void *fs_read(const char *name, size_t *size) {
-  char path[FS_MAX_PATH];
-  struct stat fstat;
-  if (_fs_check_search_path(name, &path[0], &fstat) != FS_ESUCCESS) {
-    return NULL;
-  }
-  FILE *fp = fopen(path, _FS_MREAD);
-  if (!fp) {
-    return NULL;
-  }
-  *size = fstat.st_size;
-  void *b = FS_MALLOC(*size);
-  if (!b) {
-    return NULL;
-  }
-  fread(b, 1, *size, fp);
-  fclose(fp);
-  return b;
-}
-
-_FS_PRIVATE int _fs_write_to_file(const char *path, const char *mode, const void *data, const size_t size) {
-  if (strstr(path, "..")) {
-    return FS_EWRITEFAIL;
-  }
-  FILE *fp = fopen(path, mode);
-  if (!fp) {
-    return FS_EWRITEFAIL;
-  }
-  int wsize = fwrite(data, sizeof(char), size, fp);
-  fclose(fp);
-  return wsize == size
-    ? FS_ESUCCESS
-    : FS_EWRITEFAIL;
-}
-
-_FS_PRIVATE int _fs_write_to_file_ext(const char *path, const char *mode, const fs_write_desc *desc) {
-  if (strstr(path, "..")) {
-    return FS_EWRITEFAIL;
-  }
-  FILE *fp = fopen(path, mode);
-  if (!fp) {
-    return FS_EWRITEFAIL;
-  }
-  int wsize = fwrite(desc->data, sizeof(char), desc->size, fp);
-  fclose(fp);
-  return wsize == desc->size
-    ? FS_ESUCCESS
-    : FS_EWRITEFAIL;
-}
-
-int fs_write(const char *name, const fs_write_desc *desc) {
-  _FS_SANITY_WRITE_DIR();
-  int err;
+typedef struct {
   char buf[FS_MAX_PATH];
-  _FS_CNCT_PATH(buf, _fs_write_dir, name);
-  _FS_CREATE_DIR_TREE();
-  return _fs_write_to_file_ext(buf, _FS_MWRITE, desc);
+} _fs_path;
+
+typedef struct {
+  int count;
+  _fs_path base_path[FS_MAX_PATH];
+  _fs_path write_dir;
+  char cwd[FS_MAX_PATH];
+  bool valid;
+} _fs_state_t;
+static _fs_state_t _fs;
+
+/* private implementation functions */
+
+_FS_PRIVATE inline bool _fs_strempty(const _fs_path* str) {
+  return 0 == str->buf[0];
 }
 
-int fs_append(const char *name, const fs_write_desc *desc) {
-  _FS_SANITY_WRITE_DIR();
-  int err;
-  char buf[FS_MAX_PATH];
-  _FS_CNCT_PATH(buf, _fs_write_dir, name);
-  _FS_CREATE_DIR_TREE();
-  return _fs_write_to_file_ext(buf, _FS_MAPPEND, desc);
-}
-
-FS_API_DECL int fs_get_info(const char *path, fs_info *info) {
-  _FS_SANITY_SEARCH_PATH();
-  char buf[FS_MAX_PATH];
-  struct stat fstat;
-  int err = _fs_check_search_path(path, &buf[0], &fstat);
-  if (err) {
-    return err;
-  }
-  info->size = fstat.st_size;
-  info->modtime = fstat.st_mtime;
-  if (S_ISREG(fstat.st_mode)) {
-    info->type = FS_FILETYPE_REG;
-  } else if (S_ISDIR(fstat.st_mode)) {
-    info->type = FS_FILETYPE_DIR;
-  } else if (S_ISLNK(fstat.st_mode)) {
-    info->type = FS_FILETYPE_SYM;
+_FS_PRIVATE void _fs_strcpy(_fs_path* dst, const char* src) {
+  if (src) {
+    strncpy(dst->buf, src, FS_MAX_PATH);
+    dst->buf[FS_MAX_PATH-1] = 0;
   } else {
-    info->type = FS_FILETYPE_NONE;
+    memset(dst->buf, 0, FS_MAX_PATH);
   }
-  return FS_ESUCCESS;
 }
 
-FS_API_DECL char *fs_get_cwd() {
-  char *cwd = FS_MALLOC(FS_MAX_PATH);
-  return getcwd(cwd, FS_MAX_PATH);
+_FS_PRIVATE bool _fs_concat_path(char* dst, const _fs_path* dir, const char* filename) {
+  const size_t dirlen = strlen(dir->buf);
+  if (dirlen + strlen(filename) + 2 > FS_MAX_PATH) {
+    return false;
+  }
+  const char* str = (dir->buf[dirlen - 1] == '/') ? "%s%s" : "%s/%s";
+  sprintf(dst, str, dir->buf, filename);
+  return true;
 }
 
-FS_API_DECL int fs_mkdir(const char *path) {
-  _FS_SANITY_WRITE_DIR();
-  int err;
+_FS_PRIVATE bool _fs_get_file_info(const char* filename, fs_info* info) {
+  struct stat fstat;
+  if (stat(filename, &fstat) != 0) {
+    return false;
+  }
+  if (info != NULL) {
+    info->size = fstat.st_size;
+    info->modtime = fstat.st_mtime;
+    if (S_ISREG(fstat.st_mode)) {
+      info->type = FS_FILETYPE_REG;
+    } else if (S_ISDIR(fstat.st_mode)) {
+      info->type = FS_FILETYPE_DIR;
+    } else if (S_ISLNK(fstat.st_mode)) {
+      info->type = FS_FILETYPE_SYM;
+    } else {
+      info->type = FS_FILETYPE_NONE;
+    }
+  }
+  return true;
+}
+
+_FS_PRIVATE bool _fs_native_delete(const char* filename) {
+  return remove(filename) == 0;
+}
+
+_FS_PRIVATE bool _fs_native_mkdir(const char* path) {
   char buf[FS_MAX_PATH];
-  _FS_CNCT_PATH(buf, _fs_write_dir, path);
-  return _fs_make_dirs(buf);
+  if (strlen(path) > FS_MAX_PATH - 1) {
+    return false; 
+  }
+  strcpy(buf, path);
+  for (char* p = buf + 1; *p; p++) {
+    if (*p == '/') {
+      *p = '\0';
+      if (mkdir(buf, S_IRWXU) != 0 && errno != EEXIST) {
+        return false;
+      }
+      *p = '/';
+    }
+  }
+  if (mkdir(buf, S_IRWXU) != 0 && errno != EEXIST) {
+    return false;
+  }   
+  return true;
 }
 
-FS_API_DECL int fs_delete(const char *name) {
-  _FS_SANITY_WRITE_DIR();
-  int err;
+_FS_PRIVATE FILE* _fs_native_open(const char* filename, int mode) {
+  if ((mode == _FS_MREAD) && !_fs_get_file_info(filename, NULL)) {
+    return NULL;
+  }
+  if ((mode == _FS_MAPPEND || mode == _FS_MWRITE) && _fs_strempty(&_fs.write_dir)) {
+    return NULL;
+  }
+  FILE* fp = NULL;
+  switch (mode) {
+  case _FS_MREAD: fp = fopen(filename, "rb"); break;
+  case _FS_MAPPEND: fp = fopen(filename, "a"); break;
+  case _FS_MWRITE: fp = fopen(filename, "wb"); break;
+  }
+  return (!fp) ? NULL : fp;
+}
+
+_FS_PRIVATE void* _fs_native_read(FILE* fp, size_t* size) {
+  if (fp == NULL) {
+    return NULL;
+  }
+  fseek(fp, 0, SEEK_END);
+  *size = ftell(fp);
+  fseek(fp, 0, SEEK_SET);
+  void* buf = FS_MALLOC(*size);
+  if (!buf) {
+    return NULL;
+  }
+  fread(buf, 1, *size, fp);
+  fclose(fp);
+  return buf;
+}
+
+_FS_PRIVATE int _fs_native_write(FILE* fp, const fs_data* data) {
+  if (fp == NULL) {
+    return false;
+  }
+  size_t size = fwrite((char*)(data->data), sizeof(char), data->size, fp);
+  fclose(fp);
+  return size == data->size;
+}
+
+/* public api functions */
+
+void fs_setup(const fs_desc* desc) {
+  FS_ASSERT(desc);
+  _fs_strcpy(&_fs.write_dir, desc->write_dir);
+  for (int i = 0; i < FS_MAX_MOUNTS; i++) {
+    if (desc->base_paths[i]) {
+      _fs_strcpy(&_fs.base_path[i], desc->base_paths[i]);
+      _fs.count++;  
+    }
+  }
+  /* always last */
+  _fs.valid = true;
+}
+
+void fs_shutdown(void) {
+  FS_ASSERT(_fs.valid);
+  _fs.valid = false;
+}
+
+bool fs_is_valid(void) {
+  return _fs.valid;
+}
+
+bool fs_insert_basepath(const char* path) {
+  FS_ASSERT(path);
+  if (strlen(path) >= FS_MAX_PATH || _fs.count >= FS_MAX_MOUNTS) {
+    return false;
+  }
+  _fs_path* dir = &_fs.base_path[_fs.count - 1];
+  for (; dir >= _fs.base_path; dir--) {
+    if (strcmp(dir->buf, path) == 0) {
+      return false;
+    }
+  }
+  dir = &_fs.base_path[_fs.count++];
+  strcpy(dir->buf, path);
+  return true;
+}
+
+bool fs_remove_basepath(const char* path) {
+  FS_ASSERT(path);
+  _fs_path* dir = &_fs.base_path[_fs.count - 1];
+  for (; dir >= _fs.base_path; dir--) {
+    if (strcmp(dir->buf, path) == 0) {
+      int idx = dir - _fs.base_path;
+      memmove(dir, dir + 1, (_fs.count - idx - 1) * sizeof(_fs_path));
+      memset(&_fs.base_path[_fs.count - 1].buf, 0, FS_MAX_PATH);
+      _fs.count--;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool fs_exists(const char* filename) {
+  FS_ASSERT(filename);
   char buf[FS_MAX_PATH];
-  _FS_CNCT_PATH(buf, _fs_write_dir, name);
-  return (remove(buf) != 0)
-    ? FS_EREMOVE
-    : FS_ESUCCESS;
+  _fs_path* dir = &_fs.base_path[_fs.count - 1];
+  for (; dir >= _fs.base_path; dir--) {
+    if (_fs_concat_path(buf, dir, filename) && _fs_get_file_info(buf, NULL)) {
+      return true;
+    }
+  }
+  return false;
 }
 
-FS_API_DECL inline void fs_free(void *p) {
+void* fs_read(const char* name, size_t* size) {
+  FS_ASSERT(name && size);
+  char buf[FS_MAX_PATH];
+  _fs_path* dir = &_fs.base_path[_fs.count - 1];
+  for (; dir >= _fs.base_path; dir--) {
+    if (!_fs_concat_path(buf, dir, name)) {
+      continue;
+    }
+    FILE* fp = _fs_native_open(buf, _FS_MREAD);
+    return _fs_native_read(fp, size);
+  }
+  return NULL;
+}
+
+bool fs_write(const char* name, const fs_data* data) {
+  FS_ASSERT(name && data);
+  if (_fs_strempty(&_fs.write_dir)) {
+    return false;
+  }
+  char buf[FS_MAX_PATH];
+  if (!_fs_concat_path(buf, &_fs.write_dir, name)) {
+    return false;
+  }
+  FILE* fp = _fs_native_open(buf, _FS_MWRITE);
+  return _fs_native_write(fp, data);
+}
+
+bool fs_append(const char* name, const fs_data* data) {
+  FS_ASSERT(name && data);
+  if (_fs_strempty(&_fs.write_dir)) {
+    return false;
+  }
+  char buf[FS_MAX_PATH];
+  if (!_fs_concat_path(buf, &_fs.write_dir, name)) {
+    return false;
+  }
+  FILE* fp = _fs_native_open(buf, _FS_MAPPEND);
+  return _fs_native_write(fp, data);
+}
+
+bool fs_get_info(const char* path, fs_info* info) {
+  FS_ASSERT(path && info);
+  char buf[FS_MAX_PATH];
+  _fs_path* dir = &_fs.base_path[_fs.count - 1];
+  for (; dir >= _fs.base_path; dir--) {
+    if (_fs_concat_path(buf, dir, path) && _fs_get_file_info(buf, info)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const char* fs_get_cwd() {
+  if (_fs.cwd[0] == 0 && getcwd(_fs.cwd, FS_MAX_PATH) == 0) {
+    return NULL;
+  }
+  return _fs.cwd;
+}
+
+bool fs_mkdir(const char* path) {
+  FS_ASSERT(path);
+  if (_fs_strempty(&_fs.write_dir)) {
+    return false;
+  }
+  char buf[FS_MAX_PATH];
+  if (!_fs_concat_path(buf, &_fs.write_dir, path)) {
+    return false;
+  }
+  return _fs_native_mkdir(buf);
+}
+
+bool fs_delete(const char* name) {
+  FS_ASSERT(name);
+  if (_fs_strempty(&_fs.write_dir)) {
+    return false;
+  }
+  char buf[FS_MAX_PATH];
+  if (!_fs_concat_path(buf, &_fs.write_dir, name)) {
+    return false;
+  }
+  return _fs_native_delete(buf);
+}
+
+inline void fs_free(void* p) {
   FS_FREE(p);
 }
 
