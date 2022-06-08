@@ -12,13 +12,13 @@ a *tiny* library for interfacing with a filesystem.
 into an existing project and compiled along with it. The library provides 7 functions for interfacing with a filesystem.
 
 ```c
-fs_append(const char* name, const fs_data* data)
-fs_delete(const char* name)
-fs_exists(const char* path)
-fs_get_info(const char* path, fs_info* info)
-fs_mkdir(const char* path)
-fs_read(const char* name, size_t* size)
-fs_write(const char* name, const fs_data* data)
+fs_append(const char* name, const fs_data* data);
+fs_delete(const char* name);
+fs_exists(const char* path);
+fs_get_info(const char* path, fs_info* info);
+fs_mkdir(const char* path);
+fs_read(const char* name, size_t* size);
+fs_write(const char* name, const fs_data* data);
 ```
 
 ```c
