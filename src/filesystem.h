@@ -125,7 +125,7 @@
 
 
         const char* text = "the quick brown fox jumps over the lazy dog";
-        if (!fs_write("example.txt", FS_DATA(text))) {
+        if (!fs_write("example.txt", FS_DATA_STR_REF(text))) {
           return -1;
         }
 
@@ -240,8 +240,8 @@ FS_API_DECL inline void fs_free(void* p);
 /* reference-based equivalents for c++ */
 inline void fs_setup(const fs_desc& data) { return fs_setup(&data); }
 inline bool fs_get_info(const char* filename, fs_info &info) { return fs_get_info(filename, &info); }
-inline bool fs_write(const char* name, fs_data &data) { return fs_write(filename, &data); }
-inline bool fs_append(const char* name, fs_data &data) { return fs_append(filename, &data); }
+inline bool fs_write(const char* name, fs_data &data) { return fs_write(name, &data); }
+inline bool fs_append(const char* name, fs_data &data) { return fs_append(name, &data); }
 
 #endif
 
